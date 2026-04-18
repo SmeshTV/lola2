@@ -61,7 +61,7 @@ serve(async (req) => {
         { name: '👥 **Участники**', value: `\`${(event.registered_players?.length || 0)}/${event.max_players || 10}\``, inline: true },
         { name: '👤 **Ведущий**', value: event.host_name || 'Не указан', inline: true },
         { name: '📊 **Статус**', value: statusLabels[event.status] || '📋 Неизвестно', inline: true },
-        { name: '\u200b', value: `🔗 [Зарегистрироваться](https://loladiscord.ru/events)\n💬 [Discord сервер](https://discord.gg/lolaamongus)`, inline: false },
+        { name: '\u200b', value: `🔗 [Зарегистрироваться](https://loolaa.netlify.app/events)\n💬 [Discord сервер](https://discord.gg/lolaamongus)`, inline: false },
       ],
       footer: { text: event.footer || '✨ LOLA Server', icon_url: event.thumbnail || 'https://cdn.discordapp.com/icons/1463228311118549124/a_1463228311118549124.png' },
       timestamp: new Date().toISOString(),

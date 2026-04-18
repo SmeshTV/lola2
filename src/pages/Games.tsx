@@ -347,7 +347,7 @@ const Games = () => {
   }, []); // Только при монтировании
 
   const playCoinFlip = useCallback((choice: CoinSide) => {
-    if (!user || playing) return;
+    if (!user || playing || gameInProgress.current) return;
     setCoinSide(choice);
     const casinoResult = playCasinoGame('coinflip', bet, balance, choice, hasInsurance, hasLuckyHour);
     setTimeout(() => {
@@ -356,7 +356,7 @@ const Games = () => {
   }, [user, bet, playing, balance, playGame, hasInsurance, hasLuckyHour]);
 
   const playDice = useCallback(() => {
-    if (!user || playing) return;
+    if (!user || playing || gameInProgress.current) return;
     const casinoResult = playCasinoGame('dice', bet, balance, undefined, hasInsurance, hasLuckyHour);
     setPlaying(true);
     setTimeout(() => {
@@ -365,7 +365,7 @@ const Games = () => {
   }, [user, bet, playing, balance, playGame, hasInsurance, hasLuckyHour]);
 
   const playRoulette = useCallback((color: RouletteColor) => {
-    if (!user || playing) return;
+    if (!user || playing || gameInProgress.current) return;
     setRouletteColor(color);
     const casinoResult = playCasinoGame('roulette', bet, balance, color, hasInsurance, hasLuckyHour);
     setTimeout(() => {

@@ -2,12 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Gamepad2, Home, Trophy, ShoppingBag, LayoutDashboard,
-  LogIn, LogOut, Shield, Menu, X, Sun, Moon,
+  LogIn, LogOut, Shield, Menu, X,
   ChevronDown, Radio, Dice1, Ticket, AlertTriangle,
   HelpCircle, Users, Mail, Info, Star, Calendar, ScrollText, FileText
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import { useTheme } from '../hooks/useTheme';
 
 interface NavItem {
   path: string;
@@ -24,7 +23,6 @@ interface NavCategory {
 const Navbar = () => {
   const location = useLocation();
   const { user, permissions, signInWithDiscord, signOut } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -207,15 +205,6 @@ const Navbar = () => {
 
           {/* Правая часть */}
           <div className="flex items-center gap-2">
-            {/* Тема */}
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-xl transition-all hover:scale-110 active:scale-95 text-gray-300 hover:text-yellow-400 hover:bg-white/10"
-              aria-label="Переключить тему"
-            >
-              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-
             {/* Админ */}
             {showAdmin && (
               <Link

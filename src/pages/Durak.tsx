@@ -20,7 +20,8 @@ const RANKS_52: CardRank[] = ['2','3','4','5','6','7','8','9','10','J','Q','K','
 const RANK_VAL: Record<CardRank, number> = {
   '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14
 };
-const SUIT_SYM: Record<CardSuit, string> = { hearts:'♥', diamonds:'♦', clubs:'♣', spades:'♠' };
+const SUIT_SYM: Record<CardSuit, string> = { hearts:'❤', diamonds:'♦', clubs:'♧', spades:'♤' };
+const SUIT_COLOR: Record<CardSuit, string> = { hearts:'text-red-600', diamonds:'text-blue-600', clubs:'text-green-600', spades:'text-purple-600' };
 
 interface Card { suit: CardSuit; rank: CardRank }
 
@@ -89,15 +90,16 @@ interface DurakRoom {
 
 // ===== КОМПОНЕНТ КАРТЫ =====
 function CardView({ 
-  card, onClick, disabled, selected, showSuit, 
+  card, onClick, disabled, selected, showSuit, isTrump,
   showCheck, onCheck, checkDisabled 
 }: {
-  card?: Card; onClick?: () => void; disabled?: boolean; selected?: boolean; showSuit?: boolean;
+  card?: Card; onClick?: () => void; disabled?: boolean; selected?: boolean; showSuit?: boolean; isTrump?: boolean;
   showCheck?: boolean; onCheck?: () => void; checkDisabled?: boolean;
 }) {
   if (!card) return <div className="w-14 h-20 md:w-16 md:h-24 rounded-lg border-2 border-blue-700 bg-gradient-to-br from-blue-600 to-blue-800 shadow-md flex items-center justify-center shrink-0"><span className="text-blue-300 text-xl">🂠</span></div>;
   
-  const isRed = card.suit === 'hearts' || card.suit === 'diamonds';
+  const suitColor = SUIT_COLOR[card.suit];
+  const trumpStyle = isTrump ? 'ring-2 ring-yellow-400 shadow-yellow-400/50 shadow-lg' : '';
   
   return (
     <div className="relative shrink-0 transition-transform duration-200">
@@ -106,12 +108,13 @@ function CardView({
         disabled={disabled}
         className={`relative w-14 h-20 md:w-16 md:h-24 rounded-lg border-2 shadow-md flex flex-col items-center justify-center select-none
           ${selected ? 'ring-2 ring-yellow-400 -translate-y-2 z-10' : ''}
+          ${trumpStyle}
           ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-1 hover:shadow-lg active:scale-95'}
           bg-white`}
       >
-        {showSuit && <span className={`text-xs md:text-sm ${isRed ? 'text-red-500' : 'text-gray-800'} absolute top-0.5 left-1`}>{SUIT_SYM[card.suit]}</span>}
-        <span className={`font-bold text-base md:text-lg ${isRed ? 'text-red-500' : 'text-gray-800'}`}>{card.rank}</span>
-        {showSuit && <span className={`text-xs md:text-sm ${isRed ? 'text-red-500' : 'text-gray-800'} absolute bottom-0.5 right-1 rotate-180`}>{SUIT_SYM[card.suit]}</span>}
+        {showSuit && <span className={`text-xs md:text-sm ${suitColor} absolute top-0.5 left-1`}>{SUIT_SYM[card.suit]}</span>}
+        <span className={`font-bold text-base md:text-lg ${suitColor}`}>{card.rank}</span>
+        {showSuit && <span className={`text-xs md:text-sm ${suitColor} absolute bottom-0.5 right-1 rotate-180`}>{SUIT_SYM[card.suit]}</span>}
       </button>
       
       {/* Кнопка проверки блефа */}
@@ -143,6 +146,7 @@ export default function DurakGame() {
     bet: 0, hasBet: false, mode: 'podkidnoy', maxPlayers: 2, bluffMode: false, deckSize: 36 as 36 | 52
   });
   const [actionLoading, setActionLoading] = useState(false);
+  const [isSurrendering, setIsSurrendering] = useState(false); // Защита от многократного нажатия
   const [showTrump, setShowTrump] = useState(true);
   const [bluffHistory, setBluffHistory] = useState<string[]>([]);
   const [clearedTable, setClearedTable] = useState<TableEntry[] | null>(null); // Для проверки после "Бито"
@@ -515,24 +519,38 @@ export default function DurakGame() {
 
   // ===== СДАТЬСЯ =====
   const surrender = async () => {
-    if (!room || myIdx < 0) return;
-    const others = room.players.filter((_, i) => i !== myIdx);
-    const winnerId = others[0]?.id || null;
-    const betAmount = room.has_bet ? room.bet : 0;
-
-    if (winnerId && betAmount > 0) {
-      await supabase.rpc('add_mushrooms', { user_id: winnerId, amount: betAmount });
-      await supabase.rpc('add_mushrooms', { user_id: user!.id, amount: -betAmount });
-    }
-    if (winnerId) await supabase.rpc('add_game_xp', { p_user_id: winnerId, p_bet: Math.max(room.bet, 10), p_result: 'win' });
-    await supabase.rpc('add_game_xp', { p_user_id: user!.id, p_bet: Math.max(room.bet, 10), p_result: 'loss' });
+    if (!room || myIdx < 0 || isSurrendering) return; // Защита от повторного нажатия
+    setIsSurrendering(true); // Блокируем кнопку
     
-    await supabase.from('games').insert([{ user_id: user!.id, game_type: 'Дурак', bet: room.bet, result: 'loss', mushrooms_change: -betAmount }]);
-    if (winnerId) await supabase.from('games').insert([{ user_id: winnerId, game_type: 'Дурак', bet: room.bet, result: 'win', mushrooms_change: betAmount }]);
+    try {
+      const others = room.players.filter((_, i) => i !== myIdx);
+      const winnerId = others[0]?.id || null;
+      const betAmount = room.has_bet ? room.bet : 0;
 
-    await supabase.from('durak_rooms').update({ status: 'finished', winner: winnerId, loser: user!.id }).eq('id', roomId);
-    refreshUser?.();
-    addToast({ title: '💀 Вы сдались', message: 'Вы — дурак!', icon: '💀', duration: 4000 });
+      if (winnerId && betAmount > 0) {
+        // Используем единую функцию recordGame для корректной записи
+        await supabase.rpc('add_mushrooms', { user_id: winnerId, amount: betAmount });
+        await supabase.rpc('add_mushrooms', { user_id: user!.id, amount: -betAmount });
+      }
+      if (winnerId) await supabase.rpc('add_game_xp', { p_user_id: winnerId, p_bet: Math.max(room.bet, 10), p_result: 'win' });
+      await supabase.rpc('add_game_xp', { p_user_id: user!.id, p_bet: Math.max(room.bet, 10), p_result: 'loss' });
+      
+      // Записываем игру только один раз
+      await supabase.from('games').insert([{ user_id: user!.id, game_type: 'Дурак', bet: room.bet, result: 'loss', mushrooms_change: -betAmount }]);
+      if (winnerId) await supabase.from('games').insert([{ user_id: winnerId, game_type: 'Дурак', bet: room.bet, result: 'win', mushrooms_change: betAmount }]);
+
+      await supabase.from('durak_rooms').update({ status: 'finished', winner: winnerId, loser: user!.id }).eq('id', roomId);
+      refreshUser?.();
+      addToast({ title: '💀 Вы сдались', message: 'Вы — дурак!', icon: '💀', duration: 4000 });
+    } catch (err) {
+      console.error('Ошибка при сдаче:', err);
+      addToast({ title: '❌ Ошибка', message: 'Не удалось сдаться', icon: '❌', duration: 3000 });
+    } finally {
+      setIsSurrendering(false); // Разблокируем кнопку
+      // Обновляем комнату чтобы убрать кнопки
+      const { data: updatedRoom } = await supabase.from('durak_rooms').select('*').eq('id', roomId).single();
+      if (updatedRoom) setRoom(updatedRoom);
+    }
   };
 
   // ===== ОПРЕДЕЛЕНИЕ ВАЛИДНЫХ КАРТ ДЛЯ UI =====
@@ -589,6 +607,7 @@ export default function DurakGame() {
                   <div className="font-bold text-lg">52 карты</div><div className="text-xs text-gray-400">2 → A</div>
                 </button>
               </div>
+              <p className="text-xs text-gray-500 mt-2">💡 Колода отображается слева для удобства</p>
             </div>
             
             <div>
@@ -682,8 +701,8 @@ export default function DurakGame() {
       {showTrump && room.status === 'playing' && room.trumpCard && (
         <div className="text-center mb-3">
           <span className="text-xs text-gray-500 mr-2">Козырь:</span>
-          <CardView card={room.trumpCard} showSuit />
-          <span className={`ml-2 font-bold ${room.trump === 'hearts' || room.trump === 'diamonds' ? 'text-red-500' : 'text-gray-800'}`}>{SUIT_SYM[room.trump]}</span>
+          <CardView card={room.trumpCard} showSuit isTrump />
+          <span className={`ml-2 font-bold ${SUIT_COLOR[room.trump]}`}>{SUIT_SYM[room.trump]}</span>
         </div>
       )}
 
@@ -756,7 +775,25 @@ export default function DurakGame() {
           {isAttacker && allDefended && (
             <button onClick={doneButton} className="flex-1 btn-primary text-sm">✅ Бито</button>
           )}
-          <button onClick={surrender} className="flex-1 py-3 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 rounded-xl text-sm font-medium border border-yellow-500/20 flex items-center justify-center gap-2"><Flag size={14} /> Сдаться</button>
+          <button 
+            onClick={surrender} 
+            disabled={isSurrendering}
+            className={`flex-1 py-3 rounded-xl text-sm font-medium border flex items-center justify-center gap-2 ${
+              isSurrendering 
+                ? 'bg-gray-500/10 text-gray-400 cursor-not-allowed border-gray-500/20' 
+                : 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border-yellow-500/20'
+            }`}
+          >
+            {isSurrendering ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Сдача...
+              </>
+            ) : (
+              <>
+                <Flag size={14} /> Сдаться
+              </>
+            )}
+          </button>
         </div>
       )}
 

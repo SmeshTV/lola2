@@ -50,6 +50,8 @@ interface Event {
   status: string;
   created_at: string;
   discord_message_id?: string;
+  discord_event_id?: string;
+  role_ping?: string;
   exclusive_access_duration?: number;
   exclusive_until?: string;
   exclusive_description?: string;
@@ -93,8 +95,14 @@ const syncEventToDiscord = async (event: Event) => {
     const statusLabels: Record<string, string> = { upcoming: '📅 Предстоящий', completed: '✅ Завершён', cancelled: '❌ Отменён' };
     const emoji = gameOptions.find(g => g.name === event.game)?.emoji || event.game_emoji || '🎮';
 
+    // Восстанавливаем rolePing из базы данных если он есть
+    let content = null;
+    if (event.role_ping) {
+      content = `<@&${event.role_ping}>`;
+    }
+
     const payload = {
-      content: null,
+      content: content,
       embeds: [{
         title: `${emoji} ${event.title}`,
         description: event.description ? `**📝 Описание:**\n${event.description}` : null,
@@ -314,6 +322,7 @@ const EventsPage = () => {
   // Автоматическое определение статуса по дате
   const getEventStatus = (event: Event): { status: 'upcoming' | 'live' | 'completed' | 'cancelled', label: string, color: string } => {
     if (event.status === 'cancelled') return { status: 'cancelled', label: 'Отменён', color: 'bg-red-500/20 text-red-400' };
+    if (event.status === 'completed') return { status: 'completed', label: 'Завершено', color: 'bg-gray-500/20 text-gray-400' };
 
     const eventDateStr = `${event.date}T${event.time || '00:00'}`;
     const eventDate = new Date(eventDateStr);
@@ -322,8 +331,8 @@ const EventsPage = () => {
     const diffMinutes = diffMs / (1000 * 60);
     const diffHours = diffMs / (1000 * 60 * 60);
 
-    // Мероприятие прошло (больше 2 часов назад от конца предполагаемого)
-    if (diffHours < -2) {
+    // Мероприятие прошло (больше 3 часов после времени начала)
+    if (diffHours < -3) {
       return { status: 'completed', label: 'Завершено', color: 'bg-gray-500/20 text-gray-400' };
     }
 

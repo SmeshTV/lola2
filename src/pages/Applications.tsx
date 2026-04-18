@@ -1,9 +1,16 @@
-import { useState, memo } from 'react';
+import { useState, memo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Shield, Send, Users, Star, Crown, CheckCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { addToast } from '../components/NotificationToast';
+
+// Роли которые могут рассматривать заявки
+const ALLOWED_ROLES = [
+  '1463230825041756302', // @𝓛𝓸𝓵𝓪
+  '1463271031501357067', // @ℳ𝒶𝒾𝓃 ℳ𝑜𝒹𝑒𝓇𝒶𝓉𝑜𝓇
+  '1464965472704266414', // @𝓖𝓻𝓪𝓷𝓭 𝓜𝓸𝓭
+];
 
 const roleOptions = [
   'Game Architect',
@@ -40,6 +47,17 @@ const ApplicationsPage = () => {
   const [aboutMe, setAboutMe] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [sending, setSending] = useState(false);
+  const [canViewApplications, setCanViewApplications] = useState(false);
+
+  // Проверка прав пользователя на просмотр заявок
+  useEffect(() => {
+    if (user && user.discord_roles) {
+      const hasAllowedRole = user.discord_roles.some((role: string) => 
+        ALLOWED_ROLES.includes(role)
+      );
+      setCanViewApplications(hasAllowedRole);
+    }
+  }, [user]);
 
   if (!user) {
     return (

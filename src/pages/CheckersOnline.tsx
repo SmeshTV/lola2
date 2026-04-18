@@ -395,8 +395,11 @@ export default function CheckersOnline() {
     navigate(`/checkers-online/${id}`, { replace: true });
   };
 
+  const [surrenderClicked, setSurrenderClicked] = useState(false);
+  
   const surrender = () => {
-    if (!room || winner || !myColorRef.current) return;
+    if (!room || winner || !myColorRef.current || surrenderClicked) return;
+    setSurrenderClicked(true); // Блокируем повторные нажатия
     endGame(myColorRef.current === 'w' ? 'b' : 'w');
   };
 

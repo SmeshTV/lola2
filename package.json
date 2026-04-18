@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
+    "@supabase/auth-helpers-react": "^0.15.0",
     "@supabase/supabase-js": "^2.102.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.344.0",

@@ -255,9 +255,11 @@ export default function GameRooms() {
         const gameWinner = getWinner(hostChoice, guestChoice);
         
         if (gameWinner === hostChoice) {
+          // Хост победил: получает свою ставку назад + ставку гостя
           hostMushrooms = bet;
           guestMushrooms = -bet;
         } else {
+          // Гость победил: получает свою ставку назад + ставку хоста
           hostMushrooms = -bet;
           guestMushrooms = bet;
         }
