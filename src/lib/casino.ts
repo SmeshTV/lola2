@@ -126,7 +126,9 @@ export function playCasinoGame(
   saveStats(stats);
 
   // 6. Расчёт грибов + страховка
-  let mushroomsChange = win ? bet : -bet;
+  // При победе: игрок получает ставку назад + выигрыш (итого +bet * 2)
+  // При проигрыше: игрок теряет ставку (-bet)
+  let mushroomsChange = win ? bet * 2 : -bet;
   let insuranceRefund = 0;
 
   // Страховка: возврат 30% при проигрыше

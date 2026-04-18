@@ -101,7 +101,7 @@ interface RoleApplication {
 
 const AdminPanel = () => {
   const { user, permissions, loading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'warnings' | 'webhooks' | 'events' | 'tickets' | 'applications'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'warnings' | 'webhooks' | 'events' | 'tickets' | 'applications' | 'event_rewards'>('overview');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(() => getCached('admin_stats'));
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -167,6 +167,8 @@ const AdminPanel = () => {
   const [warningLoading, setWarningLoading] = useState(false);
   const [newWarningUser, setNewWarningUser] = useState('');
   const [newWarningReason, setNewWarningReason] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState<{id: string; username: string; discord_id: string}[]>([]);
+  const [searchingUser, setSearchingUser] = useState(false);
 
   const FUNCTIONS_URL = `${import.meta.env.VITE_SUPABASE_URL.replace(/\/$/, '')}/functions/v1`;
   const isAdmin = permissions?.isAdmin;
@@ -363,13 +365,50 @@ const AdminPanel = () => {
     } catch (e) { logger.error('Close error:', e); }
   };
 
+  // Роли которые могут рассматривать заявки (Задача 9)
+  const APPLICATION_REVIEWER_ROLE_IDS = [
+    '1463230825041756302', // @𝓛𝓸𝓵𝓪
+    '1463271031501357067', // @ℳ𝒶𝒾𝓃 ℳ𝑜𝒹𝑒𝓇𝒶𝓉𝑜𝓇
+    '1464965472704266414', // @𝓖𝓻𝓪𝓷𝓭 𝓜𝓸𝓭
+  ];
+
+  const canReviewApplications = isAdmin || APPLICATION_REVIEWER_ROLE_IDS.some(roleId => userRoles.includes(roleId));
+
+  // Принять/отклонить заявку
+  const handleReviewApplication = async (appId: string, action: 'approved' | 'rejected', note: string = '') => {
+    const { error } = await supabase
+      .from('role_applications')
+      .update({
+        status: action,
+        admin_note: note,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', appId);
+
+    if (error) {
+      addToast({ title: 'Ошибка', message: 'Не удалось обновить статус заявки', icon: '❌', duration: 4000 });
+    } else {
+      setApps(apps.map(app => 
+        app.id === appId 
+          ? { ...app, status: action, admin_note: note, updated_at: new Date().toISOString() }
+          : app
+      ));
+      addToast({ 
+        title: action === 'approved' ? 'Заявка одобрена! ✅' : 'Заявка отклонена ❌', 
+        message: `Статус заявки изменён на ${action === 'approved' ? 'одобрена' : 'отклонена'}`, 
+        icon: action === 'approved' ? '✅' : '❌', 
+        duration: 3000 
+      });
+    }
+  };
+
   // Загрузка заявок
   useEffect(() => {
-    if (activeTab === 'applications' && isAdmin) {
+    if (activeTab === 'applications' && canReviewApplications) {
       supabase.from('role_applications').select('*').order('created_at', { ascending: false })
         .then(({ data }) => { if (data) setApps(data); });
     }
-  }, [activeTab, isAdmin]);
+  }, [activeTab, canReviewApplications]);
 
   // Загрузка варнов
   useEffect(() => {
@@ -431,6 +470,34 @@ const AdminPanel = () => {
     ));
   };
 
+  // Поиск пользователя (авто-поиск при вводе)
+  const handleUserSearch = async (query: string) => {
+    setNewWarningUser(query);
+    if (query.length < 2) {
+      setUserSearchResults([]);
+      return;
+    }
+    setSearchingUser(true);
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, username, discord_id')
+        .ilike('username', `%${query}%`)
+        .limit(5);
+      
+      if (data && !error) {
+        setUserSearchResults(data);
+      } else {
+        setUserSearchResults([]);
+      }
+    } catch (e) {
+      console.error('Search error:', e);
+      setUserSearchResults([]);
+    } finally {
+      setSearchingUser(false);
+    }
+  };
+
   // Выдать варн
   const handleIssueWarning = async () => {
     if (!newWarningUser || !newWarningReason) {
@@ -438,13 +505,21 @@ const AdminPanel = () => {
       return;
     }
 
-    // Ищем пользователя
-    const { data: foundUser } = await supabase
-      .from('users')
-      .select('id, username, discord_id')
-      .ilike('username', newWarningUser)
-      .limit(1)
-      .single();
+    // Ищем пользователя (берём первого из результатов или ищем точно)
+    let foundUser = userSearchResults.find(u => u.username === newWarningUser);
+    
+    if (!foundUser) {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, username, discord_id')
+        .eq('username', newWarningUser)
+        .limit(1)
+        .single();
+      
+      if (data && !error) {
+        foundUser = data;
+      }
+    }
 
     if (!foundUser) {
       alert('Пользователь не найден!');
@@ -837,10 +912,11 @@ const AdminPanel = () => {
     { id: 'overview' as const, label: 'Обзор', icon: BarChart3, required: 'any', color: 'from-green-500 to-emerald-500' },
     { id: 'warnings' as const, label: 'Варны', icon: Ban, required: 'admin', color: 'from-red-500 to-orange-500' },
     { id: 'tickets' as const, label: 'Тикеты', icon: Ticket, required: 'ticketMod', color: 'from-blue-500 to-cyan-500' },
-    { id: 'applications' as const, label: 'Заявки', icon: FileText, required: 'admin', color: 'from-purple-500 to-pink-500' },
+    { id: 'applications' as const, label: 'Заявки', icon: FileText, required: 'applicationReviewer', color: 'from-purple-500 to-pink-500' },
     { id: 'users' as const, label: 'Пользователи', icon: Users, required: 'admin', color: 'from-indigo-500 to-blue-500' },
     { id: 'webhooks' as const, label: 'Вебхуки', icon: MessageSquare, required: 'admin', color: 'from-amber-500 to-orange-500' },
     { id: 'events' as const, label: 'Ивенты', icon: Gamepad2, required: 'eventMaker', color: 'from-violet-500 to-purple-500' },
+    { id: 'event_rewards' as const, label: 'Награды за ивенты', icon: ShoppingBag, required: 'admin', color: 'from-yellow-500 to-orange-500' },
   ];
 
   const hasAccess = (required: string) => {
@@ -848,6 +924,7 @@ const AdminPanel = () => {
       case 'any': return hasAnyPermission;
       case 'admin': return isAdmin;
       case 'ticketMod': return isTicketMod;
+      case 'applicationReviewer': return canReviewApplications;
       case 'eventMaker': return canManageEvents;
       default: return false;
     }
@@ -1085,7 +1162,6 @@ const AdminPanel = () => {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-mushroom-neon font-bold">{u.mushrooms} 🍄</span>
-                      <button onClick={() => banUser(u.id)} className="p-2 bg-red-500/20 hover:bg-red-500/30 rounded-lg text-red-400 transition-colors" title="Обнулить грибы"><Ban size={16} /></button>
                     </div>
                   </div>
                 ))}
@@ -1404,7 +1480,7 @@ const AdminPanel = () => {
                               thumbnail: embedThumbnail,
                               footer: embedFooter,
                             },
-                            rolePing: rolePing ? '1467975816297054512' : null,
+                            rolePing: rolePing ? '1491866877486436573' : null,
                             createDiscordEvent,
                             discordEventPrivacy,
                           }),
@@ -1419,6 +1495,10 @@ const AdminPanel = () => {
                           const updateData: any = { discord_message_id: result.messageId };
                           if (result.discordEventId) {
                             updateData.discord_event_id = result.discordEventId;
+                          }
+                          // Сохраняем role_ping в базу чтобы он не пропадал
+                          if (rolePing) {
+                            updateData.role_ping = '1491866877486436573';
                           }
                           await supabase
                             .from('events')
@@ -1543,7 +1623,7 @@ const AdminPanel = () => {
         )}
 
         {/* Applications Tab */}
-        {activeTab === 'applications' && (
+        {activeTab === 'applications' && canReviewApplications && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <div className="glass-card p-6">
               <h3 className="text-2xl font-bold mb-4 flex items-center gap-2"><FileText className="text-mushroom-neon" /> Заявки на роли</h3>
@@ -1552,54 +1632,269 @@ const AdminPanel = () => {
               ) : (
                 <div className="space-y-4">
                   {apps.map((app) => (
-                      <div key={app.id} className="p-5 bg-white/5 rounded-xl border border-white/10">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-mushroom-neon/20 to-mushroom-purple/20 flex items-center justify-center font-bold text-mushroom-neon">
-                              {app.username.charAt(0)}
-                            </div>
-                            <div>
-                              <h4 className="font-bold">{app.username}</h4>
-                              <p className="text-xs text-gray-400">На роль: <span className="text-mushroom-neon">{app.desired_role}</span></p>
-                            </div>
+                    <div key={app.id} className="p-5 bg-white/5 rounded-xl border border-white/10">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-mushroom-neon/20 to-mushroom-purple/20 flex items-center justify-center font-bold text-mushroom-neon">
+                            {app.username.charAt(0)}
                           </div>
-                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                            app.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
-                            app.status === 'approved' ? 'bg-green-500/20 text-green-400' :
-                            'bg-red-500/20 text-red-400'
-                          }`}>
-                            {app.status === 'pending' ? 'На рассмотрении' : app.status === 'approved' ? 'Одобрена' : 'Отклонена'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                          <div className="p-3 bg-white/5 rounded-lg">
-                            <p className="text-xs text-gray-500 mb-1">Мотивация</p>
-                            <p className="text-gray-300">{app.reason}</p>
-                          </div>
-                          <div className="p-3 bg-white/5 rounded-lg">
-                            <p className="text-xs text-gray-500 mb-1">Опыт</p>
-                            <p className="text-gray-300">{app.experience}</p>
-                          </div>
-                          <div className="p-3 bg-white/5 rounded-lg">
-                            <p className="text-xs text-gray-500 mb-1">Активность</p>
-                            <p className="text-gray-300">{app.activity_hours}</p>
-                          </div>
-                          <div className="p-3 bg-white/5 rounded-lg">
-                            <p className="text-xs text-gray-500 mb-1">О себе</p>
-                            <p className="text-gray-300">{app.about_me}</p>
+                          <div>
+                            <h4 className="font-bold">{app.username}</h4>
+                            <p className="text-xs text-gray-400">На роль: <span className="text-mushroom-neon">{app.desired_role}</span></p>
                           </div>
                         </div>
-                        <p className="text-xs text-gray-500 mt-3">
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          app.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                          app.status === 'approved' ? 'bg-green-500/20 text-green-400' :
+                          'bg-red-500/20 text-red-400'
+                        }`}>
+                          {app.status === 'pending' ? 'На рассмотрении' : app.status === 'approved' ? 'Одобрена' : 'Отклонена'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div className="p-3 bg-white/5 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-1">Мотивация</p>
+                          <p className="text-gray-300">{app.reason}</p>
+                        </div>
+                        <div className="p-3 bg-white/5 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-1">Опыт</p>
+                          <p className="text-gray-300">{app.experience}</p>
+                        </div>
+                        <div className="p-3 bg-white/5 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-1">Активность</p>
+                          <p className="text-gray-300">{app.activity_hours}</p>
+                        </div>
+                        <div className="p-3 bg-white/5 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-1">О себе</p>
+                          <p className="text-gray-300">{app.about_me}</p>
+                        </div>
+                      </div>
+                      {app.admin_note && (
+                        <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                          <p className="text-xs text-blue-400 font-bold">Комментарий администратора:</p>
+                          <p className="text-sm text-gray-300">{app.admin_note}</p>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between mt-4">
+                        <p className="text-xs text-gray-500">
                           {new Date(app.created_at).toLocaleString('ru-RU')}
                         </p>
+                        {app.status === 'pending' && (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleReviewApplication(app.id, 'approved', '')}
+                              className="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg transition-colors text-sm font-bold flex items-center gap-1"
+                            >
+                              <CheckCircle size={16} /> Одобрить
+                            </button>
+                            <button
+                              onClick={() => handleReviewApplication(app.id, 'rejected', '')}
+                              className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors text-sm font-bold flex items-center gap-1"
+                            >
+                              <XCircle size={16} /> Отклонить
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </motion.div>
         )}
+
+        {/* Вкладка: Награды за ивенты (Задача 12) */}
+        {activeTab === 'event_rewards' && isAdmin && (
+          <EventRewardsTab />
+        )}
       </div>
+    </div>
+  );
+};
+
+// Компонент вкладки наград за ивенты
+const EventRewardsTab = () => {
+  const [completedEvents, setCompletedEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [playerRewards, setPlayerRewards] = useState<{[key: string]: number}>({});
+  const [processing, setProcessing] = useState(false);
+
+  const { supabase } = require('../lib/supabase');
+
+  useEffect(() => {
+    loadCompletedEvents();
+  }, []);
+
+  const loadCompletedEvents = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('status', 'completed')
+      .order('date', { ascending: false });
+    
+    if (data && !error) {
+      setCompletedEvents(data);
+    }
+    setLoading(false);
+  };
+
+  const handleSelectEvent = (event: any) => {
+    setSelectedEvent(event);
+    setPlayerRewards({});
+  };
+
+  const handleSetReward = (playerId: string, amount: number) => {
+    setPlayerRewards(prev => ({ ...prev, [playerId]: amount }));
+  };
+
+  const handleCompleteEvent = async () => {
+    if (!selectedEvent || Object.keys(playerRewards).length === 0) return;
+    
+    setProcessing(true);
+    try {
+      // Выдаём грибы каждому игроку
+      for (const [playerId, amount] of Object.entries(playerRewards)) {
+        if (amount > 0) {
+          const { error } = await supabase.rpc('add_mushrooms', { 
+            user_id: playerId, 
+            amount: amount 
+          });
+          if (error) {
+            console.error(`Failed to add mushrooms to ${playerId}:`, error);
+          }
+        }
+      }
+
+      // Перемещаем событие в историю (меняем статус на 'rewarded')
+      await supabase.from('events').update({ 
+        status: 'rewarded',
+        updated_at: new Date().toISOString()
+      }).eq('id', selectedEvent.id);
+
+      alert('✅ Награды выданы! Событие перемещено в историю.');
+      setSelectedEvent(null);
+      setPlayerRewards({});
+      loadCompletedEvents();
+    } catch (e) {
+      console.error('Error processing rewards:', e);
+      alert('❌ Ошибка при выдаче наград. Проверьте консоль.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6">
+      <h2 className="text-3xl font-bold mb-6 flex items-center gap-3">
+        <ShoppingBag className="text-yellow-400" /> Награды за мероприятия
+      </h2>
+      
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="animate-spin text-yellow-400" size={40} /></div>
+      ) : completedEvents.length === 0 ? (
+        <p className="text-gray-400 text-center py-8">Нет завершённых мероприятий без наград</p>
+      ) : (
+        <div className="space-y-6">
+          {!selectedEvent ? (
+            <div className="grid gap-4">
+              {completedEvents.map(event => (
+                <button
+                  key={event.id}
+                  onClick={() => handleSelectEvent(event)}
+                  className="p-4 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-left transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-lg">{event.title}</h3>
+                      <p className="text-sm text-gray-400">{event.date} в {event.time}</p>
+                      <p className="text-xs text-gray-500 mt-1">Игроков: {event.registered_players?.length || 0}</p>
+                    </div>
+                    <ChevronRight className="text-gray-400" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <button onClick={() => setSelectedEvent(null)} className="text-sm text-gray-400 hover:text-white flex items-center gap-1">
+                ← Назад к списку
+              </button>
+              
+              <div className="p-4 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-xl border border-yellow-500/20">
+                <h3 className="font-bold text-xl mb-2">{selectedEvent.title}</h3>
+                <p className="text-sm text-gray-400 mb-3">Дата: {selectedEvent.date} | Игроков: {selectedEvent.registered_players?.length || 0}</p>
+                
+                <div className="space-y-3 mt-4">
+                  <p className="font-bold text-yellow-400">Выдача грибов участникам:</p>
+                  {selectedEvent.registered_players?.map((playerId: string, index: number) => (
+                    <PlayerRewardRow 
+                      key={playerId} 
+                      playerId={playerId} 
+                      index={index}
+                      onSetReward={handleSetReward}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  onClick={handleCompleteEvent}
+                  disabled={processing || Object.keys(playerRewards).length === 0}
+                  className="mt-6 w-full py-3 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-bold text-white transition-all shadow-lg"
+                >
+                  {processing ? '⏳ Обработка...' : '✅ Завершить мероприятие и выдать награды'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
+// Компонент строки игрока для выдачи наград
+const PlayerRewardRow = ({ playerId, index, onSetReward }: { playerId: string, index: number, onSetReward: (id: string, amount: number) => void }) => {
+  const [playerName, setPlayerName] = useState<string>('Загрузка...');
+  const [reward, setReward] = useState<string>('');
+
+  useEffect(() => {
+    const loadPlayer = async () => {
+      const { data } = await require('../lib/supabase').supabase
+        .from('users')
+        .select('username')
+        .eq('discord_id', playerId)
+        .single();
+      if (data) setPlayerName(data.username);
+    };
+    loadPlayer();
+  }, [playerId]);
+
+  const handleChange = (value: string) => {
+    setReward(value);
+    const numValue = parseInt(value) || 0;
+    if (numValue > 0) {
+      onSetReward(playerId, numValue);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4 p-3 bg-white/5 rounded-lg">
+      <span className="text-sm text-gray-500 w-6">{index + 1}.</span>
+      <div className="flex-1">
+        <p className="font-medium text-white">{playerName}</p>
+        <p className="text-xs text-gray-500">ID: {playerId.slice(0, 8)}...</p>
+      </div>
+      <input
+        type="number"
+        value={reward}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder="Грибы"
+        min="0"
+        className="w-24 px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:border-yellow-500 focus:outline-none"
+      />
     </div>
   );
 };
